@@ -5,22 +5,27 @@ import io
 import base64
 
 app = Flask(__name__)
-orders = []  # Danh sách lưu đơn hàng
+orders = []
 
-# Nhận dữ liệu từ Raspberry Pi
+
 @app.route('/product', methods=['POST'])
 def receive_product():
     data = request.get_json()
-    data["id"] = str(uuid.uuid4())  # Gán ID duy nhất cho mỗi đơn
+    data["id"] = str(uuid.uuid4())
     orders.append(data)
     print("📦 Nhận dữ liệu:", data)
     return jsonify({"status": "success", "message": "Đã nhận thành công!"}), 200
 
-# Hiển thị đơn hàng với nút XÓA & CHECKOUT
-@app.route('/orders', methods=['GET'])
-def show_orders_fancy():
-    html = """
-    <!DOCTYPE html><html><head><meta charset="UTF-8"><title>Đơn hàng</title>
+
+@app.route('/api/orders', methods=['GET'])
+def api_orders():
+    return jsonify(orders)
+
+
+@app.route('/orders')
+def realtime_orders():
+    return """
+    <!DOCTYPE html><html><head><meta charset="UTF-8"><title>Realtime Orders</title>
     <style>
         body { font-family: 'Segoe UI', sans-serif; background: #f5f5f5; padding: 30px; }
         .card { background: white; border-radius: 15px; box-shadow: 0 2px 10px #ccc;
@@ -34,46 +39,60 @@ def show_orders_fancy():
         .delete { background: red; color: white; }
     </style>
     </head><body>
-    <h2>🧾 ĐƠN HÀNG TRÁI CÂY</h2>
-    {% for order in orders %}
-        {% for item in order.products %}
-            <div class="card">
-                <img src="https://via.placeholder.com/60?text={{item.name[0]|upper}}" />
-                <div class="info">
-                    <div><strong>PRODUCT NAME:</strong> {{ item.name.upper() }}</div>
-                    <div><strong>PER UNIT:</strong> {{ item.unit_price }}k</div>
-                    <div><strong>UNITS:</strong> {{ item.quantity }} trái</div>
-                </div>
-                <div class="pay">{{ item.total_price }}k</div>
-            </div>
-        {% endfor %}
-        <div class="buttons">
-            <a class="checkout" href="/checkout/{{ order.id }}">CHECKOUT {{ order.total_amount }}k</a>
-            <a class="delete" href="/delete/{{ order.id }}">XÓA</a>
-        </div>
-    {% endfor %}
+    <h2>🧾 ĐƠN HÀNG TRÁI CÂY (TỰ ĐỘNG CẬP NHẬT)</h2>
+    <div id="container"></div>
+
+    <script>
+    async function loadOrders() {
+        const res = await fetch('/api/orders');
+        const data = await res.json();
+        let html = '';
+        for (let order of data) {
+            for (let item of order.products) {
+                html += `
+                <div class="card">
+                    <img src="https://via.placeholder.com/60?text=${item.name[0].toUpperCase()}"/>
+                    <div class="info">
+                        <div><strong>PRODUCT NAME:</strong> ${item.name.toUpperCase()}</div>
+                        <div><strong>PER UNIT:</strong> ${item.unit_price}k</div>
+                        <div><strong>UNITS:</strong> ${item.quantity} trái</div>
+                    </div>
+                    <div class="pay">${item.total_price}k</div>
+                </div>`;
+            }
+            html += `
+            <div class="buttons">
+                <a class="checkout" href="/checkout/${order.id}">CHECKOUT ${order.total_amount}k</a>
+                <a class="delete" href="/delete/${order.id}">XÓA</a>
+            </div>`;
+        }
+        document.getElementById('container').innerHTML = html;
+    }
+
+    loadOrders();
+    setInterval(loadOrders, 3000);
+    </script>
     </body></html>
     """
-    return render_template_string(html, orders=orders)
 
-# XÓA đơn hàng
+
 @app.route('/delete/<id>')
 def delete_order(id):
     global orders
     orders = [o for o in orders if o["id"] != id]
     return "<script>location.href='/orders'</script>"
 
-# HIỂN THỊ QR GIẢ – hiện dòng chữ tổng tiền khi quét
+
 @app.route('/checkout/<id>')
 def checkout_qr(id):
     order = next((o for o in orders if o["id"] == id), None)
     if not order:
-        return "❌ Không tìm thấy đơn hàng"
+        return "<h3>❌ Không tìm thấy đơn hàng. Có thể đã bị xoá hoặc ID sai.</h3>", 404
 
     total = order["total_amount"]
-    data = f"THANH TOÁN {total}k"
+    qr_data = f"THANH TOÁN {total}k"
 
-    qr = qrcode.make(data)
+    qr = qrcode.make(qr_data)
     buf = io.BytesIO()
     qr.save(buf, format='PNG')
     encoded = base64.b64encode(buf.getvalue()).decode("utf-8")
@@ -89,10 +108,11 @@ def checkout_qr(id):
     """
     return html
 
-# Trang mặc định
+
 @app.route('/')
 def index():
     return "<h3>✅ Server đang chạy – <a href='/orders'>Xem đơn hàng</a></h3>"
+
 
 if __name__ == '__main__':
     app.run()
