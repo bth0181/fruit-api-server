@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: fruit-api-server
+    env: python
+    buildCommand: ""
+    startCommand: gunicorn server:app
+    envVars:
+      - key: FLASK_ENV
+        value: production
